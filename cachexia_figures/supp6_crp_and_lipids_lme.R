@@ -10,7 +10,7 @@ source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
 # load files 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 lab                                 <- read.csv("~/Desktop/reznik/bodycomp_main/data/clinical/lipidpanels.csv")
-bodycomp_metadata                   <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0302.csv")
+bodycomp_metadata                   <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0828.csv")
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # clean data  
@@ -37,43 +37,43 @@ lab_during_ccx$CANCERTYPE            <- as.factor(bodycomp_metadata$CANCER_TYPE_
 lab_during_ccx$AGE                   <- bodycomp_metadata$AGE_CCX[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)]
 lab_during_ccx$CLUSTER               <- factor(bodycomp_metadata$cluster_name[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)], levels = c("Type C", "Type B", "Type A"))
 lab_during_ccx$BMI                   <- bodycomp_metadata$CCX_START_BMI[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)]
-lab_during_ccx$STAGE                 <- as.factor(bodycomp_metadata$STAGE_CDM_DERIVED_GRANULAR[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)])
+lab_during_ccx$STAGE                 <- as.factor(bodycomp_metadata$STAGE_CCX[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)])
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # set up mixed linear effects model (across cancer types)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+fit_lab <- function(df) {
+  m     <- glmmTMB(LR_RESULT_VALUE ~ CLUSTER + CANCERTYPE + SEX + AGE + STAGE + BMI + (1 | MRN), data = df,family = tweedie(link = "log"))
+  emm   <- emmeans(m, ~ CLUSTER, type = "link")
 
+  broom::tidy(pairs(emm, adjust = "none", reverse = TRUE))
+}
 results_allcancers                   <- lab_during_ccx %>%
+                                        filter(!is.na(LR_RESULT_VALUE)) %>%
                                         group_by(CLEANED_TEST_NAME) %>%
                                         nest() %>%
-                                        mutate(model = map(data, ~ lmer(log(LR_RESULT_VALUE+0.00001) ~ CLUSTER  + CANCERTYPE + SEX + AGE + BMI + STAGE + (1 | MRN), data = .x, REML = TRUE)),
-                                               contrasts = map(model, ~ pairs(emmeans(.x, ~ CLUSTER), adjust = "none", reverse = TRUE)),
-                                               tidied = map(contrasts, broom::tidy)) %>%
+                                        mutate(tidied = future_map(data, fit_lab, .options = furrr_options(seed = TRUE))) %>%
+                                        select(-data) %>%
                                         unnest(tidied) %>%
-                                        ungroup() %>% 
+                                        ungroup() %>%
                                         filter(contrast %in% c("Type A - Type C", "Type B - Type C")) %>%
-                                        mutate(adj.p.value = p.adjust(p.value, method = "none")) %>%
-                                        dplyr::select(CLEANED_TEST_NAME, contrast, estimate, statistic,df, adj.p.value, std.error) %>%
+                                        mutate(log2FC      = estimate / log(2),
+                                               log2FC_SE   = std.error / log(2),
+                                               adj.p.value = p.adjust(p.value, method = "BH")) %>%
+                                        dplyr::select(CLEANED_TEST_NAME, contrast, log2FC, log2FC_SE, statistic, adj.p.value) %>%
                                         arrange(adj.p.value)
-
-results_allcancers$fold_change       <- exp(results_allcancers$estimate)
-results_allcancers <- results_allcancers %>%
-                      left_join(lab_during_ccx %>%
-                                group_by(CLEANED_TEST_NAME) %>%
-                                summarise(sd_lab = sd(LR_RESULT_VALUE, na.rm = TRUE), .groups = "drop"), by = "CLEANED_TEST_NAME") %>%
-                      mutate(std_estimate = estimate / sd_lab) %>%
-                      mutate(adj.p.value = p.adjust())
-                      dplyr::select(CLEANED_TEST_NAME, contrast, estimate, std_estimate, std.error, adj.p.value, fold_change)
 
 list_bloodlabs                      <- results_allcancers %>%
                                        filter(contrast == "Type A - Type C") %>%
-                                       arrange(estimate) %>%
+                                       arrange(log2FC) %>%
                                        pull(CLEANED_TEST_NAME)
 results_allcancers$colour           <- ifelse(results_allcancers$adj.p.value < 0.05, "sign", "no")
 
-p <- ggplot(results_allcancers, aes(x = factor(CLEANED_TEST_NAME, levels = list_bloodlabs), y = (estimate), colour = contrast, shape = colour)) + 
+p <- ggplot(results_allcancers, aes(x = factor(CLEANED_TEST_NAME, levels = list_bloodlabs), y = log2FC, colour = contrast, shape = colour)) + 
   geom_stripped_cols(colour = NA) +
   geom_point(alpha = 1) + 
+  geom_errorbar(aes(ymin = log2FC - log2FC_SE, ymax = log2FC + log2FC_SE),
+                width = 0.1, alpha = 0.6, linewidth = 0.1) +
   coord_flip() +
   geom_hline(yintercept = 0, linewidth = 0.1, linetype = "dashed") +
   theme_std() + 
@@ -87,13 +87,13 @@ p <- ggplot(results_allcancers, aes(x = factor(CLEANED_TEST_NAME, levels = list_
   
   theme(axis.ticks.y = element_blank()) 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/bloodlabs/lipids_forestplot_labs_linear_mixed_effects_wastedvsnonwasted.pdf", width = 3.25, height = 1.25)
-write.csv(results_allcancers, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/tables/supp_lipids_lme.csv", row.names = FALSE)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results//lipids_forestplot_labs_linear_mixed_effects_wastedvsnonwasted.pdf", width = 3, height = 1.25)
+write.csv(results_allcancers, file = "~/Desktop/reznik/bodycomp_main/revision///tables/supp_lipids_lme.csv", row.names = FALSE)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # boxplot of just CRP to show 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+comparisons                  <- list(c("Type B", "Type C"), c("Type A", "Type B"), c("Type A", "Type C"))
 crp                         <- lab_during_ccx %>% 
                                filter(CLEANED_TEST_NAME == "C-Reactive Protein") %>%
                                group_by(MRN) %>%
@@ -108,7 +108,8 @@ p <- ggplot(crp, aes(x = CLUSTER, y = pmin(`mean(LR_RESULT_VALUE, na.rm = TRUE)`
   theme_std() + 
   scale_fill_manual(values = rev(c("#A0CBE8FF", "#499894", "#B07AA1"))) +
   theme(legend.position = "none") +
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_x_discrete(expand = c(0,0.5))
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/crp_boxplot_clusters.pdf", width = 1.75, height = 2)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results//crp_boxplot_clusters.pdf", width = 1.25, height = 1.5)
 
