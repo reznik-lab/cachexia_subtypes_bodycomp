@@ -11,7 +11,7 @@ source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
 # load files 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 lab                                 <- read.csv("~/Desktop/reznik/bodycomp_main/data/clinical/lab_cleaned_0909.csv")
-bodycomp_metadata                   <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0302.csv")
+bodycomp_metadata                   <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0828.csv")
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # clean data  
@@ -44,7 +44,7 @@ lab_during_ccx$SEX                   <- as.factor(bodycomp_metadata$GENDER[match
 lab_during_ccx$CANCERTYPE            <- as.factor(bodycomp_metadata$CANCER_TYPE_DETAILED[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)])
 lab_during_ccx$AGE                   <- bodycomp_metadata$AGE_CCX[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)]
 lab_during_ccx$BMI                   <- bodycomp_metadata$CCX_START_BMI[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)]
-lab_during_ccx$STAGE                 <- as.factor(bodycomp_metadata$STAGE_CDM_DERIVED_GRANULAR[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)])
+lab_during_ccx$STAGE                 <- as.factor(bodycomp_metadata$STAGE_CCX[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)])
 lab_during_ccx$CLUSTER               <- factor(bodycomp_metadata$cluster_name[match(lab_during_ccx$MRN, bodycomp_metadata$MRN)], levels = c("Type C", "Type B", "Type A"))
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # set up mixed linear effects model (across cancer types)
@@ -53,32 +53,35 @@ lab_during_ccx$CLUSTER               <- factor(bodycomp_metadata$cluster_name[ma
 labs_long                            <- lab_during_ccx %>% 
                                         pivot_longer(cols = all_of(lab_names), 
                                                      names_to = "lab_name", 
-                                                     values_to = "lab_value")
+                                                     values_to = "lab_value") %>%
+                                        group_by(lab_name) %>%
+                                        mutate(lab_value_z = as.numeric(scale(lab_value))) %>%
+                                        ungroup()
 
 options(emmeans = list(lmerTest.limit = 10000000, pbkrtest.limit = 10000000))
+plan(multisession, workers = future::availableCores() - 1)
 
-results_allcancers                   <- labs_long %>%
-                                        group_by(lab_name) %>%
-                                        nest() %>%
-                                        mutate(model = map(data, ~ lmer(log(lab_value+0.00001) ~ CLUSTER  + CANCERTYPE + SEX + AGE + STAGE + BMI + (1 | MRN),, data = .x, REML = TRUE)),
-                                               contrasts = map(model, ~ pairs(emmeans(.x, ~ CLUSTER), adjust = "none", reverse = TRUE)),
-                                               tidied = map(contrasts, broom::tidy)) %>%
-                                        unnest(tidied) %>%
-                                        ungroup() %>% 
-                                        filter(contrast %in% c("Type A - Type C", "Type B - Type C")) %>%
-                                        mutate(adj.p.value = p.adjust(p.value, method = "BH")) %>%
-                                        dplyr::select(lab_name, contrast, estimate, statistic,df, adj.p.value, std.error) %>%
-                                        arrange(adj.p.value)
+fit_lab <- function(df) {
+  
+  m     <- glmmTMB(lab_value ~ CLUSTER + CANCERTYPE + SEX + AGE + STAGE + BMI + (1 | MRN),data = df,family = tweedie(link = "log"))
+  emm   <- emmeans(m, ~ CLUSTER, type = "link")
+  broom::tidy(pairs(emm, adjust = "none", reverse = TRUE))
+}
+results_allcancers <- labs_long %>%
+                      filter(!is.na(lab_value)) %>%
+                      group_by(lab_name) %>%
+                      nest() %>%
+                      mutate(tidied = future_map(data, fit_lab, .options = furrr_options(seed = TRUE))) %>%
+                      select(-data) %>%
+                      unnest(tidied) %>%
+                      ungroup() %>%
+                      filter(contrast %in% c("Type A - Type C", "Type B - Type C")) %>%
+                      mutate(log2FC      = estimate / log(2),
+                             log2FC_SE   = std.error / log(2),
+                             adj.p.value = p.adjust(p.value, method = "BH")) %>%
+                      dplyr::select(lab_name, contrast, log2FC, log2FC_SE, statistic, adj.p.value) %>%
+                      arrange(adj.p.value)
 
-results_allcancers                   <- results_allcancers %>%
-                                        left_join(labs_long %>%
-                                        group_by(lab_name) %>%
-                                        summarise(sd_lab = sd(lab_value, na.rm = TRUE), .groups = "drop"), by = "lab_name") %>%
-                                        mutate(std_estimate = estimate / sd_lab) %>%
-                                        dplyr::select(lab_name, contrast, estimate, std_estimate, std.error, adj.p.value)
-
-
-results_allcancers$fold_change      <- exp(results_allcancers$estimate)
 results_allcancers$colour           <- ifelse(results_allcancers$adj.p.value < 0.05, "sign", "no")
 
 # make some lab names nicer when plotting 
@@ -97,16 +100,19 @@ sub_results                         <- results_allcancers %>%
 
 list_bloodlabs                      <- sub_results %>%
                                        filter(contrast == "Type A - Type C") %>%
-                                       arrange(estimate) %>%
+                                       arrange(log2FC) %>%
                                        pull(lab_name)
 
-p <- ggplot(sub_results, aes(x = factor(lab_name, levels = list_bloodlabs), y = (estimate), colour = contrast, shape = colour)) + 
+p <- ggplot(sub_results, aes(x = factor(lab_name, levels = list_bloodlabs), y = (log2FC), colour = contrast, shape = colour)) + 
   geom_stripped_cols(colour = NA) +
   geom_point(alpha = 1) + 
+  geom_errorbar(aes(ymin = log2FC - log2FC_SE, ymax = log2FC + log2FC_SE),
+                width = 0.1, alpha = 0.6, linewidth = 0.1) +
   coord_flip() +
   geom_hline(yintercept = 0, linewidth = 0.1, linetype = "dashed") +
   theme_std() + 
   labs(x = "", shape = "", colour = "") +
+  scale_y_continuous(limits = c(-0.1, 0.8)) +
   ylab(expression(log[2](Fold-Change))) +
   scale_shape_manual(values = c("no" = 2, "sign" = 8),
                      labels = c("no" = "not-significant", "sign" = "significant")) +
@@ -117,90 +123,15 @@ p <- ggplot(sub_results, aes(x = factor(lab_name, levels = list_bloodlabs), y = 
   theme(axis.ticks.y = element_blank()) 
 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/lme_blood_labs.pdf", width = 4, height = 3.25)
-write.csv(results_allcancers, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/tables/supp_all_labs_lme.csv", row.names = FALSE)
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# set up mixed linear effects model (within each cancer type)
-# sanitry check to make sure that trend holds 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-unique_cancers              <- unique(lab_during_ccx$CANCERTYPE)
-
-for(cancer in unique_cancers){
-  formula <- if(cancer %in% c("Breast Invasive Ductal Carcinoma","Prostate","Uterine Endometrioid Carcinoma",
-                              "Prostate Adenocarcinoma","High-Grade Serous Ovarian Cancer",
-                              "Uterine Serous Carcinoma")){
-    log(lab_value+0.000001) ~ CLUSTER + AGE + BMI + STAGE + (1 | MRN)
-  } else {
-    log(lab_value+0.000001) ~ CLUSTER + SEX + AGE + BMI + STAGE+ (1 | MRN)
-  }
-  
-  
-  df_cancer        <- labs_long %>% filter(CANCERTYPE == cancer)
-  results <- df_cancer %>%
-    group_by(lab_name) %>%
-    nest() %>%
-    mutate(model = map(data, ~ lmer(formula, data = .x, REML = TRUE)),
-           contrasts = map(model, ~ pairs(emmeans(.x, ~ CLUSTER), adjust = "none", reverse = TRUE)),
-           tidied = map(contrasts, broom::tidy)) %>%
-    unnest(tidied) %>%
-    ungroup() %>% 
-    filter(contrast %in% c("Type A - Type C", "Type B - Type C")) %>%
-    mutate(adj.p.value = p.adjust(p.value, method = "BH")) %>%
-    dplyr::select(lab_name, contrast, estimate, statistic,df, adj.p.value, std.error) %>%
-    arrange(adj.p.value)
-  
-  results_allcancers                   <- results %>%
-    left_join(labs_long %>%
-                group_by(lab_name) %>%
-                summarise(sd_lab = sd(lab_value, na.rm = TRUE), .groups = "drop"), by = "lab_name") %>%
-    mutate(std_estimate = estimate / sd_lab) %>%
-    mutate(fold_change = exp(estimate)) %>%
-    dplyr::select(lab_name, contrast, estimate, std_estimate, std.error, adj.p.value, fold_change)
-  
-  results_allcancers$colour           <- ifelse(results_allcancers$adj.p.value < 0.05, "sign", "no")
-  
-  # make some lab names nicer when plotting 
-  results_allcancers$lab_name         <- gsub("..Total", "", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("\\.", " ", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("Eos", "Eosinophils", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("Baso", "Basophil", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("Neut", "Neutrophil", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("Lymph", "Lymphocyte", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("Mono", "Monocyte", results_allcancers$lab_name)
-  results_allcancers$lab_name         <- gsub("ALK", "Alk. Phos.", results_allcancers$lab_name)
-  
-  list_bloodlabs                      <- results_allcancers %>%
-    filter(contrast == "Type A - Type C") %>%
-    arrange(fold_change) %>%
-    pull(lab_name)
-  
-  p <- ggplot(results_allcancers, aes(x = factor(lab_name, levels = list_bloodlabs), y = (fold_change), colour = contrast, shape = colour)) + 
-    geom_stripped_cols(colour = NA) +
-    geom_point(alpha = 1) + 
-    coord_flip() +
-    geom_hline(yintercept = 0, linewidth = 0.1, linetype = "dashed") +
-    theme_std() + 
-    labs(x = "", shape = "", colour = "") +
-    ylab(expression(~beta/SD)) +
-    ggtitle(cancer) +
-    scale_shape_manual(values = c("no" = 2, "sign" = 8),
-                       labels = c("no" = "not-significant", "sign" = "significant")) +
-    scale_colour_manual(labels = c("Type A - Type C" = "Type A vs. Type C",
-                                   "Type B - Type C" = "Type B vs. Type C"),
-                        values = c("#499894", "#B07AA1"))+
-    
-    theme(axis.ticks.y = element_blank(),
-          plot.title = element_text(family = "ArialMT", size = 7, hjust = 0.5, face = "bold")) 
-  
-  # Save plot
-  ggsave(filename = paste0("~/Desktop/reznik/bodycomp/results/cancertypemixedlmblood/volcano_", cancer, ".pdf"),
-         plot = p, width = 6, height = 4, dpi = 300)
-  message("Saved plot for ", cancer)
-}
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results///lme_blood_labs.pdf", width = 4, height = 3.25)
+write.csv(results_allcancers, file = "~/Desktop/reznik/bodycomp_main/revision///tables/supp_all_labs_lme_09252026.csv", row.names = FALSE)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # trends of select labs
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+copy_of_labs                     <- copy(lab_during_ccx)
+copy_of_labs$Date                <- as.Date(copy_of_labs$Date)
+
 copy_of_labs                     <- copy(lab_during_ccx)
 copy_of_labs$Date                <- as.Date(copy_of_labs$Date)
 
@@ -236,21 +167,21 @@ mean_points                      <- copy_of_labs %>%
 p <- ggplot(copy_of_labs, aes(x = norm_time, y = Albumin)) + 
   geom_line(alpha = 0.05, linewidth = 0.05, mapping = aes(group = MRN), colour = "#BAB0ACFF") + 
   geom_smooth(data = mean_points, aes(y = mean_albumin, colour = CLUSTER, x = time_bin), method = "loess", se = FALSE, linewidth = 0.25, inherit.aes = FALSE) +
-  geom_hline(yintercept = 3.5, colour = "black", linetype = "dashed", linewidth = 0.1) +
-  geom_hline(yintercept = 5.4, colour = "black", linetype = "dashed", linewidth = 0.1) +
+  #geom_hline(yintercept = 3.5, colour = "black", linetype = "dashed", linewidth = 0.1) +
+  #geom_hline(yintercept = 5.4, colour = "black", linetype = "dashed", linewidth = 0.1) +
   geom_point(data = mean_points, aes(x = time_bin, y = mean_albumin, colour = CLUSTER), size = 0.5, stroke = NA) +
   geom_errorbar(data = mean_points, aes(x = time_bin, ymin = mean_albumin - ci_albumin, ymax = mean_albumin + ci_albumin, colour = CLUSTER), inherit.aes = FALSE, width = 0.01, linewidth = 0.1) +
   scale_colour_manual(values = rev(c("#B07AA1FF", "#499894FF", "#A0CBE8FF"))) +
   #facet_wrap(~CLUSTER) + 
-  scale_y_continuous(expand = c(0,0), limits = c(3, 4)) +
-  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0), limits = c(-2.5, 2.5)) +
+  #scale_x_continuous(expand = c(0,0)) +
   theme_std() +
   theme(
         panel.spacing = unit(0.5, "cm"),
         strip.background = element_rect(size = 0.1)) +
-  labs(x = "Normalized time", y = "Albumin", colour = "")
+  labs(x = "Normalized time", y = "Albumin (g/dL)", colour = "")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_albumin_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_albumin_all.pdf", width = 2, height = 1.5, dpi = 300)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # alk phos
@@ -270,10 +201,10 @@ p <- ggplot(copy_of_labs, aes(x = norm_time, y = ALK)) +
      theme(
            panel.spacing = unit(0.5, "cm"),
            strip.background = element_rect(size = 0.1)) +
-     labs(x = "Normalized time", y = "Alk. Phos.", colour = "")
+     labs(x = "Normalized time", y = "Alk. Phos. (IU/L)", colour = "")
 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_alkphos_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_alkphos_all.pdf", width = 2, height = 1.5, dpi = 300)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # billirubin
@@ -293,9 +224,9 @@ p <- ggplot(copy_of_labs, aes(x = norm_time, y = Bilirubin..Total)) +
   theme(
     panel.spacing = unit(0.5, "cm"),
     strip.background = element_rect(size = 0.1)) +
-  labs(x = "Normalized time", y = "Bilirubin", colour = "")
+  labs(x = "Normalized time", y = "Bilirubin (mg/dL)", colour = "")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_bilirubin_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_bilirubin_all.pdf", width = 2, height = 1.5, dpi = 300)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -318,7 +249,7 @@ p <- ggplot(copy_of_labs, aes(x = norm_time, y = NLR)) +
         strip.background = element_rect(size = 0.1)) +
   labs(x = "Normalized time", y = "NLR", colour = "")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_nlr_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_nlr_all.pdf", width = 2, height = 1.5, dpi = 300)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # hgb
@@ -338,9 +269,9 @@ p <- ggplot(copy_of_labs, aes(x = norm_time, y = HGB)) +
   theme(
     panel.spacing = unit(0.5, "cm"),
     strip.background = element_rect(size = 0.1)) +
-  labs(x = "Normalized time", y = "HGB", colour = "")
+  labs(x = "Normalized time", y = "HGB (g/dL)", colour = "")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_hgp_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_hgp_all.pdf", width = 2, height = 1.5, dpi = 300)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # AST
@@ -362,7 +293,7 @@ p <- ggplot(copy_of_labs, aes(x = norm_time, y = AST)) +
     strip.background = element_rect(size = 0.1)) +
   labs(x = "Normalized time", y = "AST", colour = "")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/longitudinal_ast_all.pdf", width = 2.5, height = 1.5, dpi = 300)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//longitudinal_ast_all.pdf", width = 2.5, height = 1.5, dpi = 300)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # big matrix comparisons within each cancer type
@@ -390,37 +321,61 @@ results_allcancers$sign      <- ifelse(results_allcancers$p.value < 0.05, TRUE, 
 # compare slopes across lab values 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# get first or labst labs 
-first_last_labs               <- lab_during_ccx %>%
-                                 group_by(MRN) %>%
-                                 filter(Date == min(Date, na.rm = TRUE) | Date == max(Date, na.rm = TRUE))
+lab_long <- lab_during_ccx %>%
+            select(MRN, Date, all_of(lab_names)) %>%
+            pivot_longer(cols = all_of(lab_names), names_to = "lab_name", values_to = "value") %>%
+            filter(!is.na(value), !is.na(Date))
 
-# calculate delta 
-first_last_labs               <- first_last_labs %>%
-                                 group_by(MRN) %>%
-                                 arrange(Date) %>%
-                                 summarise(across(all_of(lab_names), list(delta = ~ dplyr::last(.) - dplyr::first(.)), .names = "{.col}_delta"))
-                                  
+# at least two time points
+lfc_long <- lab_long %>%
+            group_by(MRN, lab_name) %>%
+            filter(n_distinct(Date) >= 2) %>%  
+            filter(Date == min(Date) | Date == max(Date)) %>%
+            arrange(Date, .by_group = TRUE) %>%
+            summarise(n_obs      = n(),
+                      first_val  = dplyr::first(value),
+                      last_val   = dplyr::last(value),
+                      log2fc     = if_else(first_val > 0 & last_val > 0,
+                      log2(last_val / first_val), NA_real_), .groups = "drop")
 
-first_last_labs$CLUSTER       <- bodycomp_metadata$cluster_name[match(first_last_labs$MRN, bodycomp_metadata$MRN)]
-pairwise.t.test(first_last_labs$NLR_delta, first_last_labs$CLUSTER)
-delta_cols <- names(first_last_labs)[grep("_delta$", names(first_last_labs))]
+lfc_wide         <- lfc_long %>%
+                    select(MRN, lab_name, log2fc) %>%
+                    pivot_wider(names_from = lab_name, values_from = log2fc, names_glue = "{lab_name}_log2fc")
 
-pairwise_results <- map_df(delta_cols, function(col) {
-  test_result    <- pairwise.t.test(first_last_labs[[col]], first_last_labs$CLUSTER)
-  cluster_means  <- first_last_labs %>% 
+lfc_wide$CLUSTER <- bodycomp_metadata$cluster_name[match(lfc_wide$MRN, bodycomp_metadata$MRN)]
+lfc_cols         <- names(lfc_wide)[grep("_log2fc$", names(lfc_wide))]
+
+pairwise_results <- map_df(lfc_cols, function(col) {
+  test_result    <- pairwise.t.test(lfc_wide[[col]], lfc_wide$CLUSTER, pool.sd = FALSE)
+  cluster_means  <- lfc_wide %>%
                     group_by(CLUSTER) %>%
                     summarise(mean_val = mean(!!sym(col), na.rm = TRUE), .groups = 'drop')
   
-  p_values      <- test_result$p.value
+  p_values       <- test_result$p.value
   
-  if (!is.null(p_values)) {as.data.frame(as.table(p_values)) %>%
-                           filter(!is.na(Freq)) %>%
-                           mutate(lab_value = col, cluster_1 = as.character(Var1), cluster_2 = as.character(Var2), pvalue = Freq) %>%
-                           select(-Var1, -Var2, -Freq) %>%
-                           left_join(cluster_means %>% dplyr::rename(cluster_1 = CLUSTER, mean_1 = mean_val), by = "cluster_1") %>%
-                           left_join(cluster_means %>% dplyr::rename(cluster_2 = CLUSTER, mean_2 = mean_val), by = "cluster_2") %>%
-                           mutate(FC = mean_1 / mean_2, log2FC = log2(FC)) %>%
-                           select(lab_value, cluster_1, cluster_2, mean_1, mean_2, FC, log2FC, pvalue)}}) 
-pairwise_results         <- pairwise_results %>% filter(cluster_1 == "Type C")
+  if (!is.null(p_values)) {
+    as.data.frame(as.table(p_values)) %>%
+      filter(!is.na(Freq)) %>%
+      mutate(lab_value = col,
+             cluster_1 = as.character(Var1),
+             cluster_2 = as.character(Var2),
+             pvalue    = Freq) %>%
+      select(-Var1, -Var2, -Freq) %>%
+      left_join(cluster_means %>% dplyr::rename(cluster_1 = CLUSTER, mean_1 = mean_val), by = "cluster_1") %>%
+      left_join(cluster_means %>% dplyr::rename(cluster_2 = CLUSTER, mean_2 = mean_val), by = "cluster_2") %>%
+      select(lab_value, cluster_1, cluster_2, mean_1, mean_2, pvalue)}})
+
+pairwise_results <- pairwise_results %>%
+                    filter((cluster_1 == "Type A" & cluster_2 == "Type C") |
+                    (cluster_1 == "Type C" & cluster_2 == "Type A") |
+                    (cluster_1 == "Type B" & cluster_2 == "Type C") |
+                    (cluster_1 == "Type C" & cluster_2 == "Type B")) %>%
+                    mutate(swap = cluster_2 == "Type C", 
+                           comparison_cluster = if_else(swap, cluster_1, cluster_2),  
+                           mean_log2fc_ref    = if_else(swap, mean_2, mean_1),
+                           mean_log2fc_comp   = if_else(swap, mean_1, mean_2),
+                           log2FC_diff        = mean_log2fc_comp - mean_log2fc_ref,
+                           FC_diff            = 2^log2FC_diff) %>%
+                     select(lab_value, comparison_cluster, mean_log2fc_ref, mean_log2fc_comp, log2FC_diff, FC_diff, pvalue)
+
 pairwise_results$q.value <- p.adjust(pairwise_results$pvalue, method = "BH")
