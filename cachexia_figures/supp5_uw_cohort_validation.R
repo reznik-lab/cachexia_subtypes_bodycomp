@@ -47,7 +47,7 @@ qc_rules                             <- list(
   "StartEvent_L3FatValues_L3SATMedian"           = c(-120, -30),
   "EndEvent_L3FatValues_L3SATMedian"           = c(-120, -30),
   "StartEvent_L3FatValues_L3VATMedian"           = c(-120, -60),
-  "EndEventL3FatValues_L3VATMedian"           = c(-120, -60),
+  "EndEvent_L3FatValues_L3VATMedian"           = c(-120, -60),
   
   "StartEvent_LiverValues_LiverMedianHU"         = c(-50, 180),
   "StartEvent_LiverValues_LiverVolume"           = c(100, 5000),
@@ -83,8 +83,16 @@ for (col in names(qc_rules)) {
   }
 }
 
+uw_bodycomp$EndEvent_SpleenValues_SpleenMedianHU  <- ifelse(is.na(uw_bodycomp$EndEvent_SpleenValues_SpleenVolume), NA, uw_bodycomp$EndEvent_SpleenValues_SpleenMedianHU)
+uw_bodycomp$EndEvent_SpleenValues_SpleenVolume    <- ifelse(is.na(uw_bodycomp$EndEvent_SpleenValues_SpleenMedianHU), NA, uw_bodycomp$EndEvent_SpleenValues_SpleenVolume)
+uw_bodycomp$EndEvent_L3FatValues_L3VATMedian      <- ifelse(uw_bodycomp$EndEvent_L3FatValues_L3VATArea < 20, NA, uw_bodycomp$EndEvent_L3FatValues_L3VATMedian)
+
+uw_bodycomp$StartEvent_SpleenValues_SpleenMedianHU  <- ifelse(is.na(uw_bodycomp$StartEvent_SpleenValues_SpleenVolume), NA, uw_bodycomp$StartEvent_SpleenValues_SpleenMedianHU)
+uw_bodycomp$StartEvent_SpleenValues_SpleenVolume    <- ifelse(is.na(uw_bodycomp$StartEvent_SpleenValues_SpleenMedianHU), NA, uw_bodycomp$StartEvent_SpleenValues_SpleenVolume)
+uw_bodycomp$StartEvent_L3FatValues_L3VATMedian      <- ifelse(uw_bodycomp$StartEvent_L3FatValues_L3VATArea < 20, NA, uw_bodycomp$StartEvent_L3FatValues_L3VATMedian)
+
 uw_bodycomp                        <- uw_bodycomp  %>% 
-                                      filter(StartEvent_L3FatValues_L3VATArea > 35 & EndEvent_L3FatValues_L3TATArea > 35)
+                                      filter(StartEvent_L3FatValues_L3TATArea > 35 & EndEvent_L3FatValues_L3TATArea > 35)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # calculate deltas
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,7 +133,7 @@ rownames(bodycomp_deltas)               <- bodycomp_deltas$coded_id
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # repeat subtyping as before 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+set.seed(123)
 delta_cols                              <- colnames(bodycomp_deltas)[grepl("delta_", colnames(bodycomp_deltas))]
 bodycomp_deltas_knn                     <- VIM::kNN(bodycomp_deltas, k = 10, imp_var = FALSE, variable = delta_cols)
 rownames(bodycomp_deltas_knn)           <- bodycomp_deltas_knn$coded_id
@@ -146,7 +154,7 @@ cluster_df$MRN                            <- as.numeric((rownames(cluster_df)))
 
 
 bodycomp_deltas$cluster                   <- cluster_df$cluster[match(bodycomp_deltas$coded_id, cluster_df$MRN)]
-bodycomp_deltas$cluster_name              <- ifelse(bodycomp_deltas$cluster == 1, "Type A", ifelse(bodycomp_deltas$cluster == 2, "Type B", "Type C"))
+bodycomp_deltas$cluster_name              <- ifelse(bodycomp_deltas$cluster == 1, "Type B", ifelse(bodycomp_deltas$cluster == 2, "Type C", "Type A"))
 clusters                                  <- as.data.frame(as.factor(bodycomp_deltas$cluster)) 
 rownames(clusters)                        <- bodycomp_deltas$coded_id
 rownames(bodycomp_deltas)                 <- bodycomp_deltas$coded_id
@@ -161,7 +169,8 @@ clean_labels                              <- gsub("(?<=\\w)(Density)", " \\1", c
 clean_labels                              <- gsub("(?<=\\w)(Volume)", " \\1", clean_labels, perl = TRUE)
 clean_labels                              <- gsub("Area", " Volume", clean_labels, perl = TRUE)
 clean_labels                              <- gsub("BMDLStandard", " Bone Mineral Density", clean_labels, perl = TRUE)
-
+clean_labels                              <- gsub("Muscle", "SKM", clean_labels, perl = TRUE)
+clean_labels                              <- gsub("SKM Volume", "SKM", clean_labels, perl = TRUE)
 mat                                       <- t(delta_values) 
 row_labels                                <- clean_labels  
 column_labels                             <- rownames(delta_values) 
@@ -196,7 +205,7 @@ ht <- Heatmap(
   show_parent_dend_line = FALSE,
   show_row_dend = FALSE,
   # row split must now be indexed by patients (columns)
-  column_split = factor(clusters$`as.factor(bodycomp_deltas$cluster)`, labels = (c("Type A", "Type B", "Type C"))),
+  column_split = factor(bodycomp_deltas$cluster_name, labels = (c("Type A", "Type B", "Type C"))),
   column_title_gp = gpar(fontsize = 6, fontfamily = "ArialMT"),
   column_gap = unit(2, "mm"),
   height = unit(nrow(mat) * 3, "mm"),
@@ -205,9 +214,11 @@ ht <- Heatmap(
   border_gp = gpar(lwd = 0.1)
 )
 
-pdf(file = "~/Desktop/reznik/bodycomp_main/results/cachexia/clusters/heatmap_clusters_0227_uw.pdf", width = 4, height = 5)
+pdf(file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//uw_validation_heatmap_clusters_0902.pdf", width = 4, height = 5)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
+
+comparisons                  <- list(c("Type B", "Type C"), c("Type A", "Type B"), c("Type A", "Type C"))
 bodycomp_deltas$cluster_name      <- factor(bodycomp_deltas$cluster_name, levels = c("Type A", "Type B", "Type C"))
 
 pairwise.t.test(bodycomp_deltas$delta_SAT, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
@@ -219,15 +230,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_SAT, 100))) +
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"SAT (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("SAT") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_SAT_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_SAT_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_VAT, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_VAT ~ cluster_name)
@@ -238,15 +252,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_VAT, 100))) +
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"VAT (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("VAT") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_VAT_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_VAT_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_MuscleArea, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_MuscleArea ~ cluster_name)
@@ -257,15 +274,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_MuscleArea, 10
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"SKM (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("SKM") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_skm_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_skm_wastednonwasted.pdf", width = 1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_LiverArea, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_LiverArea ~ cluster_name)
@@ -276,15 +296,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_LiverArea, 100
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Liver Volume (%)")) +
+  ggtitle("Liver Volume") +
+  ylab(expression(Delta*"(%)")) +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_liver_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results///uw_boxplot_liver_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_LiverDensity, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_LiverDensity ~ cluster_name)
@@ -295,15 +318,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_LiverDensity, 
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Liver Density (HU)")) +
+  ylab(expression(Delta*"(HU)")) +
+  ggtitle("Liver Density") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_liverdensity_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results//uw_boxplot_liverdensity_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_SpleenVolume, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_SpleenVolume ~ cluster_name)
@@ -314,15 +340,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_SpleenVolume, 
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Spleen Volume (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("Spleen Volume") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_spleen_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_spleen_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_SpleenDensity, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_SpleenDensity ~ cluster_name)
@@ -333,15 +362,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_SpleenDensity,
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Spleen Density (HU)")) +
+  ylab(expression(Delta*"(HU)")) +
+  ggtitle("Spleen Density") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") + 
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_spleendensity_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_spleendensity_wastednonwasted.pdf", width = 1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_PancreasVolume, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_PancreasVolume ~ cluster_name)
@@ -352,15 +384,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_PancreasVolume
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Pancreas Volume (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("Pancreas Volume") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") + 
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_pancreas_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results//uw_boxplot_pancreas_wastednonwasted.pdf", width = 1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_PancreasDensity, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_PancreasDensity ~ cluster_name)
@@ -371,14 +406,17 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_PancreasDensit
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Pancreas Density (HU)")) +
+  ggtitle("Pancreas Density") +
+  ylab(expression(Delta*"(HU)")) +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +  
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_pancreasdensity_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results/uw_boxplot_pancreasdensity_wastednonwasted.pdf", width = 1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_KidneyVolume, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_KidneyVolume ~ cluster_name)
@@ -389,15 +427,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_KidneyVolume, 
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Kidney Volume (%)")) +
+  ylab(expression(Delta*"(%)")) +
+  ggtitle("Kidney Volume") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +  
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_kidney_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision///results//uw_boxplot_kidney_wastednonwasted.pdf", width = 1.75, height =2, units = "in")
 
 pairwise.t.test(bodycomp_deltas$delta_KidneyDensity, bodycomp_deltas$cluster_name, p.adjust.method = "BH")
 bodycomp_deltas %>% cohens_d(delta_KidneyDensity ~ cluster_name)
@@ -408,15 +449,18 @@ p <- ggplot(bodycomp_deltas, aes(x = cluster_name, y = pmin(delta_KidneyDensity,
   theme_std() + 
   geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.1) +
   labs(x = "") + 
-  ylab(expression(Delta*"Kidney Density (HU)")) +
+  ylab(expression(Delta*"(HU)")) +
+  ggtitle("Kidney Density") +
   theme(legend.position = "none",
         axis.line.x.top = element_blank(),
         axis.text.x.top = element_blank(),
-        axis.ticks.x.top = element_blank()) + 
+        axis.ticks.x.top = element_blank(),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold", family = "ArialMT")) + 
+  stat_compare_means(comparisons = comparisons, method = "t.test", p.adjust.method = "BH", label = "p.format", step.increase = 0.1, bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +  
   scale_colour_manual(values = c("#B07AA1FF","#499894FF", "#A0CBE8FF")) + 
   scale_x_discrete(labels = c("Type A", "Type B", "Type C"), position = "bottom") 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_boxplot_kidneydensity_wastednonwasted.pdf", width =2, height =2, units = "in")
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_boxplot_kidneydensity_wastednonwasted.pdf", width =1.75, height =2, units = "in")
 
 bodycomp_deltas$cancertype   <- uw_bodycomp$Cancer.Primary.Site.Detail[match(bodycomp_deltas$coded_id, uw_bodycomp$coded_id)]
 bodycomp_deltas$primary_site <- uw_bodycomp$primary_site_description[match(bodycomp_deltas$coded_id, uw_bodycomp$coded_id)]
@@ -479,7 +523,7 @@ p <- ggplot(filter(bodycomp_changes_long, loss_organ %in% non_densities), aes(x 
   theme(strip.background = element_blank())
 
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_histograms_bodycompchanges_allorgans.pdf", width = 5.5, height = 2)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/results/uw_histograms_bodycompchanges_allorgans.pdf", width = 5.5, height = 2)
 
 p <- ggplot(filter(bodycomp_changes_long, loss_organ %in% densities), aes(x = loss)) + 
   geom_histogram(fill = "black",
@@ -510,7 +554,7 @@ p <- ggplot(filter(bodycomp_changes_long, loss_organ %in% densities), aes(x = lo
              ))) + 
   theme(strip.background = element_blank())
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/uw_histograms_bodycompchanges_allorgansdensities.pdf",width = 6.25, height = 2.25)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//results//uw_histograms_bodycompchanges_allorgansdensities.pdf",width = 6.25, height = 2.25)
 
 n_patients <- nrow(bodycomp_deltas)
 n_lost_sat <- sum(bodycomp_deltas$delta_SAT < 0)
@@ -659,61 +703,9 @@ p <- Heatmap(
   width = unit(0.4, "cm"),
 )
 
-pdf(file = "~/Desktop/reznik/bodycomp_main/results/cachexia/UW_pancreatic_heatmap_cancertypeassociations_mean_value.pdf", width = 1.25, height = 3.1)
+pdf(file = "~/Desktop/reznik/bodycomp_main/revision/main_figures//UW_pancreatic_heatmap_cancertypeassociations_mean_value.pdf", width = 1.25, height = 3.1)
 draw(p, heatmap_legend_side = "right")
 dev.off()
-
-mat <- results_means %>%
-  dplyr::select(cancer_type, cleaned_bodycomp, mean_delta) %>%
-  pivot_wider(names_from = cancer_type, values_from = mean_delta) %>%
-  column_to_rownames("cleaned_bodycomp") %>%
-  as.matrix()
-
-sig_mat <- results_means %>%
-  dplyr::select(cancer_type, cleaned_bodycomp, sig) %>%
-  pivot_wider(names_from = cancer_type, values_from = sig) %>%
-  column_to_rownames("cleaned_bodycomp") %>%
-  as.matrix()
-
-# Rest of your heatmap code
-col_fun <- colorRamp2(
-  breaks = c(min(mat, na.rm = TRUE), 0, max(mat, na.rm = TRUE)), 
-  colors = c("#59A14FFF", "white", "#D37295FF")
-)
-
-sig_layer <- function(j, i, x, y, w, h, fill) {
-  if (!is.na(sig_mat[i, j]) && sig_mat[i, j]) {
-    grid.points(x, y, pch = 8, size = unit(1, "mm"), gp = gpar(lwd = 0.3))
-  }
-}
-
-
-p <- Heatmap(
-  mat,
-  col = col_fun,
-  cluster_columns = TRUE, 
-  cluster_rows = TRUE,    
-  cell_fun = sig_layer,
-  border = "white",
-  row_names_side = "left",
-  show_row_dend = FALSE,
-  row_names_gp = gpar(fontsize = 6, fontfamily = "ArialMT"),
-  column_names_gp = gpar(fontsize = 6, fontfamily = "ArialMT"),
-  heatmap_legend_param = list(
-    title_gp = gpar(fontsize = 7, fontfamily = "ArialMT"),
-    labels_gp = gpar(fontsize = 6, fontfamily = "ArialMT"),
-    legend_height = unit(5, "mm"), 
-    legend_width = unit(20, "mm"),     
-    grid_height = unit(2, "mm"),      
-    grid_width  = unit(2, "mm"),
-    # direction = 'horizontal',
-    title_position = "topcenter",
-    title = expression("Mean\nChange"),
-    color_space = "RGB"
-  ),
-  show_column_dend = FALSE,
-  column_names_side = "bottom"
-)
 
 p <- ggplot(results_lm, aes(x = reorder(cleaned_bodycomp, OR) , y = log2(OR))) + 
   geom_stripped_cols() +
@@ -742,9 +734,10 @@ p <- ggplot(bodycomp_deltas, aes(x = factor(contrast, levels = c(1,0)), y = pmin
   theme_std() +
   theme(plot.title = element_text(family = "ArialMT", size = 7, face = "bold", hjust = 0.5),
         legend.position = "none") +
+  stat_compare_means(comparisons = list(c("1", "0")), label = "p.format", bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#F28E2BFF", "#D4A6C8FF"))
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/UW_pancreatic_vs_rest_SAT_boxplot.pdf", width = 1.5, height = 1.75)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//main_figures//UW_pancreatic_vs_rest_SAT_boxplot.pdf", width = 1.5, height = 1.75)
 
 p <- ggplot(bodycomp_deltas, aes(x = factor(contrast, levels = c(1,0)), y = delta_SATDensity)) + 
   geom_quasirandom(alpha = 0.5, aes(colour = contrast), width = 0.3, stroke = NA) + 
@@ -756,6 +749,29 @@ p <- ggplot(bodycomp_deltas, aes(x = factor(contrast, levels = c(1,0)), y = delt
   theme_std() +
   theme(plot.title = element_text(family = "ArialMT", size = 7, hjust = 0.5),
         legend.position = "none") +
+  stat_compare_means(comparisons = list(c("1", "0")), label = "p.format", bracket.size = 0.1, tip.length = 0, size = 2 , family = "ArialMT") +
   scale_colour_manual(values = c("#F28E2BFF", "#D4A6C8FF"))
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/UW_pancreatic_vs_rest_SATDensity_boxplot.pdf", width = 1.5, height = 1.75)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//main_figures//UW_pancreatic_vs_rest_SATDensity_boxplot.pdf", width = 1.5, height = 1.75)
+
+
+
+delta_vars <- c("delta_MuscleDensity", "delta_SATDensity", "delta_VATDensity",
+                "delta_KidneyDensity", "delta_PancreasDensity", "delta_SpleenDensity",
+                "delta_LiverDensity", "delta_LiverArea", "delta_KidneyVolume",
+                "delta_PancreasVolume", "delta_SpleenVolume", "delta_BMDLStandard",
+                "delta_MuscleArea", "delta_SAT", "delta_VAT", "delta_IMAT")
+
+all_pairwise_results <- map_dfr(delta_vars, function(var) {
+  bodycomp_deltas %>%
+    pairwise_t_test(
+      as.formula(paste(var, "~ cluster_name")),
+      p.adjust.method = "none",
+      pool.sd = FALSE
+    ) %>%
+    mutate(variable = var)
+})
+
+
+all_pairwise_results$p.adj.all <- p.adjust(all_pairwise_results$p, method = "BH")
+

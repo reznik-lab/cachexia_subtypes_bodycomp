@@ -9,8 +9,8 @@ gc()
 # load files 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
-bodycomp                               <- read.csv("~/Desktop/reznik/bodycomp_main/data/main_processed/processed_bodycomp_w_metadata_0220.csv")
-bodycomp_deltas                        <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0302.csv")
+bodycomp                               <- read.csv("~/Desktop/reznik/bodycomp_main/data/master_processed/processed_bodycomp_w_metadata_0828.csv")
+bodycomp_deltas                        <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_w_metdata_0828.csv")
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # process data
@@ -83,7 +83,7 @@ calculate_body_composition_deltas <- function(df) {
       scans_days =
         as.numeric(as.Date(lead(SCAN_DATE)) - as.Date(SCAN_DATE)),
       
-      scans_months = scans_days * 30.44
+      scans_months = scans_days / 30.44
     ) %>%
     ungroup() %>%
     filter(!is.na(scans_days))
@@ -123,26 +123,31 @@ combined_df$class                      <- ifelse(combined_df$type == "ccx", 1, 0
 # statistics
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-t.test(delta_SAT ~ type, data = combined_df, exact = FALSE, )
+satp <- t.test(delta_SAT ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_SAT ~ type, data = combined_df)
 
-t.test(delta_VAT ~ type, data = combined_df, exact = FALSE)
+vatp <- t.test(delta_VAT ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_VAT ~ type, data = combined_df)
-t.test(delta_MuscleArea ~ type, data = combined_df, exact = FALSE)
+
+skmp <- t.test(delta_MuscleArea ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_MuscleArea ~ type, data = combined_df)
 
-t.test(delta_LiverArea ~ type, data = combined_df, exact = FALSE)
+imatp <- t.test(delta_IMAT ~ type, data = combined_df, exact = FALSE, )$p.value
+cohens_d(delta_IMAT ~ type, data = combined_df)
+
+liver <- t.test(delta_LiverArea ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_LiverArea ~ type, data = combined_df)
 
-t.test(delta_PancreasVolume ~ type, data = combined_df, exact = FALSE)
+pancreas <- t.test(delta_PancreasVolume ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_PancreasVolume ~ type, data = combined_df)
 
-t.test(delta_KidneyVolume ~ type, data = combined_df, exact = FALSE)
+kidney <- t.test(delta_KidneyVolume ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_KidneyVolume ~ type, data = combined_df)
 
-t.test(delta_SpleenVolume ~ type, data = combined_df, exact = FALSE)
+spleen <- t.test(delta_SpleenVolume ~ type, data = combined_df, exact = FALSE)$p.value
 cohens_d(delta_SpleenVolume ~ type, data = combined_df)
 
+p.adjust(c(satp, vatp, skmp, imatp, liver, pancreas, kidney, spleen), method = "BH")
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plotting
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -157,9 +162,10 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_SAT, 30), -30), fill = type)) +
                                "ccx" = "Cachexia")) + 
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"), 
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_SAT.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//normal_fluct_density_SAT.pdf", width = 2, height = 1.7)
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_VAT, 50), -50), fill = type)) + 
   geom_density(alpha = 0.8, linewidth = 0.1) + 
@@ -172,9 +178,10 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_VAT, 50), -50), fill = type)) +
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
   #scale_x_continuous(limits = c(-50, 50)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_VAT.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures/normal_fluct_density_VAT.pdf", width = 2, height = 1.7)
 
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_MuscleArea, 15), -15), fill = type)) + 
@@ -188,9 +195,25 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_MuscleArea, 15), -15), fill = t
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
   #scale_x_continuous(limits = c(-0.015, 0.015)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_SKM.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//normal_fluct_density_SKM.pdf", width = 2, height = 1.7)
+
+p <- ggplot(combined_df, aes(x = pmax(pmin(delta_IMAT, 50), -50), fill = type)) + 
+  geom_density(alpha = 0.8, linewidth = 0.1) + 
+  ylab("Density") + 
+  xlab(expression("%"~Delta~IMAT/month)) + 
+  labs(fill = "") + 
+  scale_fill_manual(values = c("#D4A6C8FF", "#8CD17DFF"),
+                    labels = c("no_ccx" = "No Cachexia",
+                               "ccx" = "Cachexia")) + 
+  theme_std() + 
+  scale_y_continuous(expand = c(0,0)) + 
+  theme(legend.key.size = unit(0.25, "cm"), 
+        legend.position = "bottom")
+
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//normal_fluct_density_IMAT.pdf", width = 2, height = 1.7)
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_SpleenVolume, 40), -40), fill = type)) + 
   geom_density(alpha = 0.8, linewidth = 0.1) + 
@@ -202,9 +225,10 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_SpleenVolume, 40), -40), fill =
                                "ccx" = "Cachexia")) + 
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_SpleenVolume.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//normal_fluct_density_SpleenVolume.pdf", width = 2, height = 1.7)
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_KidneyVolume, 20), -20), fill = type)) + 
   geom_density(alpha = 0.8, linewidth = 0.1) + 
@@ -216,9 +240,10 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_KidneyVolume, 20), -20), fill =
                                "ccx" = "Cachexia")) + 
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_KidneyVolume.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//supp_figures//normal_fluct_density_KidneyVolume.pdf", width = 2, height = 1.7)
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_LiverArea, 30), -30), fill = type)) + 
   geom_density(alpha = 0.8, linewidth = 0.1) + 
@@ -230,9 +255,10 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_LiverArea, 30), -30), fill = ty
                                "ccx" = "Cachexia")) + 
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_LiverVolume.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision/supp_figures//normal_fluct_density_LiverVolume.pdf", width = 2, height = 1.7)
 
 p <- ggplot(combined_df, aes(x = pmax(pmin(delta_PancreasVolume, 30), -30), fill = type)) + 
   geom_density(alpha = 0.8, linewidth = 0.1) + 
@@ -244,7 +270,8 @@ p <- ggplot(combined_df, aes(x = pmax(pmin(delta_PancreasVolume, 30), -30), fill
                                "ccx" = "Cachexia")) + 
   theme_std() + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme(legend.key.size = unit(0.25, "cm"))
+  theme(legend.key.size = unit(0.25, "cm"),
+        legend.position = "bottom")
 
-ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/normal_fluct_density_PancreasVolume.pdf", width = 2.5, height = 1.5)
+ggsave(p, file = "~/Desktop/reznik/bodycomp_main/revision//supp_figures//normal_fluct_density_PancreasVolume.pdf", width = 2, height = 1.7)
 
