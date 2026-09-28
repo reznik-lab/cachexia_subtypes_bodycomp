@@ -9,7 +9,7 @@ required.packages <- c('data.table','ggplot2', 'dplyr', 'tidyr', 'stringr', 'RCo
                        'survival', 'survminer', 'speedglm', 'ComplexUpset', 'pls', "ggbeeswarm", 'broom', 'purrr', 'pheatmap', 'paletteer',
                        'tibble', 'pls', 'glmnet', 'ggstats', "DESeq2", "biomaRt", "ComplexHeatmap", "fgsea", "qusage", "circlize", "lmerTest", "tximport",
                        "lme4", "broom.mixed", "cmprsk", "patchwork", "chisq.posthoc.test", "emmeans", "multcomp", "ggbreak", "limma", "GSEABase", "edgeR",
-                       "ggfortify", "ggbiplot", "VIM", "rstatix", "rsq", "org.Hs.eg.db")
+                       "ggfortify", "ggbiplot", "VIM", "rstatix", "rsq", "org.Hs.eg.db", "future" , "furrr", "glmmTMB")
 hide <- suppressMessages(lapply(required.packages, require, character.only = TRUE))
 missing.packages <- required.packages[!required.packages %in% (.packages())]
 if(length(missing.packages)>0) stop(paste('Could not load required packages:',paste(missing.packages,collapse=', ')))
