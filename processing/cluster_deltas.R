@@ -8,7 +8,7 @@ gc()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 set.seed(123)
 source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
-bodycomp_deltas               <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_0302.csv")
+bodycomp_deltas               <- read.csv("~/Desktop/reznik/bodycomp_main/data/cachexia/cachexia_deltas_0828.csv")
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # process data
@@ -55,7 +55,7 @@ cluster_df                                <- as.data.frame(km$cluster)
 colnames(cluster_df)                      <- c("cluster")
 cluster_df$MRN                            <- as.numeric(rownames(cluster_df))
 cluster_df$cluster_name                   <- ifelse(cluster_df$cluster == 1, "Type A",
-                                                    ifelse(cluster_df$cluster == 2, "Type B", "Type C"))
+                                                    ifelse(cluster_df$cluster == 3, "Type B", "Type C"))
 bodycomp_deltas$cluster                   <- cluster_df$cluster[match(bodycomp_deltas$MRN, cluster_df$MRN)]
 bodycomp_deltas$cluster_name              <- cluster_df$cluster_name[match(bodycomp_deltas$MRN, cluster_df$MRN)]
 

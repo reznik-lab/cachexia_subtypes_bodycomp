@@ -124,5 +124,14 @@ clean_bodycomp_data <- function(bodycomp, l3 = TRUE) {
       bodycomp[[col]] <- ifelse(bodycomp[[col]] < range[1] | bodycomp[[col]] > range[2], NA, bodycomp[[col]])
     }
   }
+  
+  if ("SpleenValues.SpleenVolume" %in% names(bodycomp) && "SpleenValues.SpleenMedianHU" %in% names(bodycomp)) {
+    bodycomp$SpleenValues.SpleenMedianHU <- ifelse(is.na(bodycomp$SpleenValues.SpleenVolume), NA, bodycomp$SpleenValues.SpleenMedianHU)
+    bodycomp$SpleenValues.SpleenVolume   <- ifelse(is.na(bodycomp$SpleenValues.SpleenMedianHU), NA, bodycomp$SpleenValues.SpleenVolume)}
+  
+  bodycomp$L1FatValues.L1VATMedian       <- ifelse(bodycomp$L1FatValues.L1VATArea < 20, NA, bodycomp$L1FatValues.L1VATMedian)
+  bodycomp$L3FatValues.L3VATMedian       <- ifelse(bodycomp$L3FatValues.L3VATArea < 20, NA, bodycomp$L3FatValues.L3VATMedian)
+  bodycomp$T10FatValues.L1VATMedian      <- ifelse(bodycomp$T10FatValues.T10VATArea < 20, NA, bodycomp$T10FatValues.T10VATMedian)
+  bodycomp$T12FatValues.L1VATMedian       <- ifelse(bodycomp$T12FatValues.T12VATArea < 20, NA, bodycomp$T12FatValues.T12VATMedian)
   return(bodycomp)
 }

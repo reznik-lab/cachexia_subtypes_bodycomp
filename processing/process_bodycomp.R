@@ -13,8 +13,8 @@ source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
 # load data
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-longitidunal_key            <- read.csv("~/Desktop/reznik/bodycomp_main/data/master_processed/scan_level_master_key_w_allmetadata_0220.csv")
-bodycomp                    <- read.csv("~/Desktop/reznik/bodycomp_main/data/raw_bodycomp_files//PANCAN_20-320P_bodycomp_20260220.csv")
+longitidunal_key            <- read.csv("~/Desktop/reznik/bodycomp_main/data/master_processed/scan_level_master_key_w_allmetadata_0828.csv")
+bodycomp                    <- read.csv("~/Desktop/reznik/bodycomp_main/data/raw_bodycomp_files//PANCAN_20-320P_bodycomp_20260827.csv")
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # make sure everything is numeric and within physiological range
@@ -49,5 +49,5 @@ bodycomp_processed          <- bodycomp_processed %>%
 
 bodycomp_processed_wmetadata  <- merge(bodycomp_processed, longitidunal_key, by.y = "CASE_ID", by.x = "StudyInfo.Accession", all.x = TRUE)
 
-write.csv(bodycomp_processed, file = "~/Desktop/reznik/bodycomp_main/data/master_processed//processed_bodycomp_0220.csv", row.names = FALSE)
-write.csv(bodycomp_processed_wmetadata, file = "~/Desktop/reznik/bodycomp_main/data/master_processed/processed_bodycomp_w_metadata_0220.csv", row.names = FALSE)
+write.csv(bodycomp_processed, file = "~/Desktop/reznik/bodycomp_main/data/master_processed//processed_bodycomp_0828.csv", row.names = FALSE)
+write.csv(bodycomp_processed_wmetadata, file = "~/Desktop/reznik/bodycomp_main/data/master_processed/processed_bodycomp_w_metadata_0828.csv", row.names = FALSE)
