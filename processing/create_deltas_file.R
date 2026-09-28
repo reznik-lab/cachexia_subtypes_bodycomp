@@ -6,18 +6,23 @@ rm(list = ls())
 
 source("~/Desktop/reznik/bodycomp_main/analysis/processing/calculate_deltas_func.R")
 
-bodycomp                      <- read.csv("~/Desktop/reznik/bodycomp_main/data/main_processed/processed_bodycomp_w_metadata_0220.csv")
+bodycomp                      <- read.csv("~/Desktop/reznik/bodycomp_main/data/master_processed/processed_bodycomp_w_metadata_0828_2.csv")
 bodycomp$BMI_CHANGE           <- bodycomp$CCX_END_BMI - bodycomp$CCX_START_BMI
 bodycomp$SCAN_DATE            <- as.Date(bodycomp$SCAN_DATE)
 
 # filters to make sure no pediatric cases
 # TAT filter for anasarca
 # ensuring that all patients lose weight
+
+bodycomp$AGE_CCX             <- (as.numeric(as.Date(bodycomp$SCAN_DATE) - as.Date(bodycomp$PT_BIRTH_DTE))) / 365.25
 bodycomp_sub                  <- bodycomp %>% 
                                  dplyr::filter(SCAN_TYPE %in% c("Start-Cachexia", "Post-Cachexia")) %>%
                                  dplyr::filter(BMI_CHANGE < 0) %>%
-                                 dplyr::filter(CURRENT_AGE_DEID >= 18) %>%
-                                 dplyr::filter(L3FatValues.L3TATArea > 35)
+                                 dplyr::filter(AGE_CCX >= 18) %>%
+                                 dplyr::filter(L3FatValues.L3TATArea > 35) %>%
+                                 dplyr::filter(!CANCER_TYPE_DETAILED %in% c("Undifferentiated Carcinoma of the Pancreas",
+                                                                           "Small Cell Lung Cancer",
+                                                                           "Poorly Differentiated Non-Small Cell Lung Cancer"))
 
 # to run need wide format with SCAN_TYPE column denoting "Start-Cachexia" or "Post-Cachexia"
 bodycomp_deltas               <- calculate_body_composition_deltas(bodycomp_sub)
