@@ -6,12 +6,14 @@ gc()
 # load data and scripts
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 source("~/Desktop/reznik/bodycomp_main/analysis/prerequisites.R")
-pancreatic_subset2                  <- read.csv("~/Desktop/reznik/bodycomp_main/data/metadata/pancreatic_liver_biopsies_clusters.csv")
-bulk                                <- read.csv("~/Downloads/GSE245535_counts_scaled_DESeq_GEO.txt", sep = "\t", skip = 1)
+library(org.Hs.eg.db)
+pancreatic_subset2                  <- read.csv("~/Desktop/reznik/bodycomp_main/data/metadata/pancreatic_liver_biopsies_clusters_09042026.csv")
+bulk                                <- read.csv("~/Desktop/reznik/bodycomp_main/data/metadata/GSE245535_counts_scaled_DESeq_GEO.txt", sep = "\t", skip = 1)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # gene expression
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 pancreatic_subset2$metabo_id        <- substr(pancreatic_subset2$UniqueID, 1, nchar(pancreatic_subset2$UniqueID) -2)
 rownames(bulk)              <- bulk$GeneID
 
@@ -26,8 +28,11 @@ rownames(bulk_sub)          <- gene_ids_clean
 gene_ids_clean              <- gene_ids_clean[grepl("^ENS", gene_ids_clean)]
 
 ensembl                     <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-mapping                     <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), filters = "ensembl_gene_id", values = gene_ids_clean, mart = ensembl)
-      
+mapping <- AnnotationDbi::select(org.Hs.eg.db,
+                                 keys = gene_ids_clean,
+                                 keytype = "ENSEMBL",
+                                 columns = "SYMBOL")
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # limma
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -38,24 +43,24 @@ samples                     <- data.frame(condition = pancreatic_subset2$cluster
 samples_order               <- samples[colnames(bulk_sub), ]
 counts_matrix               <- as.matrix(log2(bulk_sub + 1))
 
-samples_order$condition     <- relevel(factor(samples_order$condition), ref = "Non-Wasted")
+samples_order$condition     <- relevel(factor(samples_order$condition), ref = "Type C")
 design                      <- model.matrix(~ condition, data = samples_order)
 
 fit                         <- lmFit(counts_matrix, design)
 fit                         <- eBayes(fit, robust = TRUE, trend = TRUE)
 
-res_atrophy                 <- topTable(fit, coef = "conditionAtrophy-Wasted", number = Inf, adjust.method = "BH") %>% 
+res_atrophy                 <- topTable(fit, coef = "conditionType B", number = Inf, adjust.method = "BH") %>% 
                                as.data.frame() %>% 
                                rownames_to_column("entrezgene_id") %>%
                                mutate(clean_id = gsub("\\..*$", "", entrezgene_id)) 
 
-res_hepaton                 <- topTable(fit, coef = "conditionInflammatory-Wasted", number = Inf, adjust.method = "BH") %>% 
+res_hepaton                 <- topTable(fit, coef = "conditionType A", number = Inf, adjust.method = "BH") %>% 
                                as.data.frame() %>% 
                                rownames_to_column("entrezgene_id") %>%
                                mutate(clean_id = gsub("\\..*$", "", entrezgene_id)) 
 
-res_atrophy$gene             <- mapping$hgnc_symbol[match(res_atrophy$clean_id, mapping$ensembl_gene_id)]
-res_hepaton$gene             <- mapping$hgnc_symbol[match(res_hepaton$clean_id, mapping$ensembl_gene_id)]
+res_atrophy$gene             <- mapping$SYMBOL[match(res_atrophy$clean_id, mapping$ENSEMBL)]
+res_hepaton$gene             <- mapping$SYMBOL[match(res_hepaton$clean_id, mapping$ENSEMBL)]
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # atrophy gsea
@@ -71,7 +76,7 @@ ranks_atrophy_list           <- sort(ranks_atrophy_list, decreasing = TRUE)
 resgsea                      <- fgsea(pathways = gs, stats = ranks_atrophy_list, minSize = 15, maxSize = 500)
 resgsea$padj                 <- as.numeric(resgsea$padj)
 resgsea                      <- resgsea[order(resgsea$padj, decreasing = FALSE), ]
-
+resgsea$leadingEdge          <- sapply(resgsea$leadingEdge, function(x) paste(unlist(x), collapse = ";"))
 resgsea$comparison           <- c("Type B - Type C")
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # inflammatory gsea
@@ -87,10 +92,10 @@ resgsea_hepato             <- fgsea(pathways = gs, stats = res_hepaton_list, min
 resgsea_hepato$padj        <- as.numeric(resgsea_hepato$padj)
 resgsea_hepato             <- resgsea_hepato[order(resgsea_hepato$padj, decreasing = FALSE), ]
 resgsea_hepato$comparison  <- c("Type A - Type C")
-
+resgsea_hepato$leadingEdge <- sapply(resgsea_hepato$leadingEdge, function(x) paste(unlist(x), collapse = ";"))
 all_gsea                   <- rbind(resgsea, resgsea_hepato) %>% as.data.frame()
-all_gsea$leadingEdge       <- sapply(all_gsea$leadingEdge, paste, collapse=",")
-write.csv(all_gsea, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/tables/supp_liver_gsea.csv", row.names = FALSE)
+
+write.csv(all_gsea, file = "~/Desktop/reznik/bodycomp_main/revision//tables/supp_liver_gsea.csv", row.names = FALSE)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # plot gsea
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -105,19 +110,24 @@ clean_hallmark_names <- function(df){
 
 hall_mark_equivs                              <- c("E2f Targets" = "E2F Targets",
                                                    "P53 Pathway" = "p53 Pathway",
-                                                   "Mtorc1 Signaling" = "mTORC1 Signaling",
-                                                   "Il6 Jak Stat3 Signaling" = "IL-6/JAK/STAT3 Signaling",
+                                                   "Mtorc1 Signaling" = "mTORC1 Signalling",
+                                                   "Il6 Jak Stat3 Signaling" = "IL-6/JAK/STAT3 Signalling",
                                                    "Uv Response Up" = "UV Response Up",
                                                    "Uv Response Dn" = "UV Response Dn",
-                                                   "Tgf Beta Signaling" = "TGF-beta Signaling",
+                                                   "Tgf Beta Signaling" = "TGF-beta Signal'ing",
                                                    "Dna Repair" = "DNA Repair",
                                                    "Tgf Beta Signaling" = "TGF-beta Signaling",
                                                    "Kras Signaling Up" = "KRAS Signaling Up",
-                                                   "Il2 Stat5 Signaling" = "IL-2/STAT5 Signaling",
+                                                   "Il2 Stat5 Signaling" = "IL-2/STAT5 Signalling",
                                                    "G2m Checkpoint" = "G2-M Checkpoint",
-                                                   "Tnfa Signaling Via Nfkb" = "TNF-alpha Signaling via NF-kB",
-                                                   "Pi3k Akt Mtor Signaling" = "PI3K/AKT/mTOR Signaling",
-                                                   "Wnt Beta Catenin Signaling" = "Wnt-beta Catenin Signaling")
+                                                   "Tnfa Signaling Via Nfkb" = "TNF-alpha Signalling via NF-kB",
+                                                   "Pi3k Akt Mtor Signaling" = "PI3K/AKT/mTOR Signalling",
+                                                   "Wnt Beta Catenin Signaling" = "Wnt-beta Catenin Signalling",
+                                                   "Oxphos" = "OXPHOS",
+                                                   "Oxidative Phosphorylation" = "OXPHOS",
+                                                   "Epithelial Mesenchymal Transition" = "EMT",
+                                                   "Emt" = "EMT",
+                                                   "Inf-Γ Response" = "Interferon Gamma Response")
 
 
 resgsea$cleaned_term                    <- clean_hallmark_names(resgsea)
@@ -131,30 +141,31 @@ resgsea_hepato$psigcolour                      <- ifelse(resgsea_hepato$padj < 0
                                                   ifelse(resgsea_hepato$padj < 0.05 & resgsea_hepato$NES < 0, "red", "black"))
 
 volcano_atrophy <- ggplot(resgsea, aes(x = NES, y = -log10(padj), colour = psigcolour)) + 
-  geom_point(stroke = NA, alpha = 0.8) +
+  geom_point(stroke = NA, alpha = 0.9) +
   theme_std() +
   theme(legend.position = "none") +
   ylab(expression(-log[10](q))) + 
-  scale_y_continuous(expand = c(0,0), limits = c(0, 18.6)) +
-  scale_colour_manual(values = c("black", "#4E79A7FF", "#E15759FF")) +
+  xlab("Normalized enrichment score") +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_colour_manual(values = c("#BAB0AC", "#E15759", "#4E79A7")) +
   geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.1) + 
   geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.1) + 
-  geom_text_repel(aes(label = cleaned_term), family = "ArialMT", size = 1, segment.size = 0.1, data = (filter(resgsea, cleaned_term %in% c("E2F Targets",  "TNF-alpha Signaling via NF-kB", "Epithelial Mesenchymal Transition", "Oxidative Phosphorylation"))))
+  geom_text_repel(aes(label = cleaned_term), family = "ArialMT", size = 1, segment.size = 0.1, data = (filter(resgsea, cleaned_term %in% c("EMT", "TNF-alpha Signalling via NF-kB", "Xenobiotic Metabolism", 'p53 Pathway'))))
 
-ggsave(volcano_atrophy, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/gsea_atrophy_liver_volcano.pdf", width = 2, height = 1.5)
+ggsave(volcano_atrophy, file = "~/Desktop/reznik/bodycomp_main/revision/main_figures//gsea_typeB_liver_volcano.pdf", width = 2.5, height = 2)
 
 volcano_inflam <- ggplot(resgsea_hepato, aes(x = NES, y = -log10(padj), colour = psigcolour)) + 
   geom_point(stroke = NA, alpha = 0.8) +
   theme_std() +
   theme(legend.position = "none") +
   ylab(expression(-log[10](q))) + 
-  scale_y_continuous(expand = c(0,0), limits = c(0, 18.6)) +
-  scale_colour_manual(values = c("black", "#4E79A7FF", "#E15759FF")) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_colour_manual(values =c("#BAB0AC", "#E15759", "#4E79A7")) +
   geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.1) + 
   geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.1) + 
-  geom_text_repel(aes(label = cleaned_term), family = "ArialMT", size = 1, segment.size = 0.1, data = (filter(resgsea_hepato, cleaned_term %in% c("E2F Targets",  "TNF-alpha Signaling via NF-kB", "Inflammatory Response"))))
+  geom_text_repel(aes(label = cleaned_term), family = "ArialMT", size = 1, segment.size = 0.1, data = (filter(resgsea_hepato, cleaned_term %in% c("TNF-alpha Signalling via NF-kB", "Inflammatory Response", "Interferon Gamma Response", "IL-6/JAK/STAT3 Signalling", "EMT"))))
 
-ggsave(volcano_inflam, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/gsea_inflam_liver_volcano.pdf", width = 2, height = 1.5)
+ggsave(volcano_inflam, file = "~/Desktop/reznik/bodycomp_main/revision/main_figures/gsea_typeA_liver_volcano.pdf", width = 2.5, height = 2)
 
 atrophy_gsea <- ggplot(filter(resgsea, padj < 0.05), aes(x = reorder(cleaned_term, NES), y = NES, fill = colour)) + 
   geom_bar(stat = "identity") + 
@@ -226,9 +237,9 @@ ggsave(p, file = "~/Desktop/reznik/bodycomp_main/results/cachexia/gsea_inflam_li
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # heatmap of bodycomps for patients
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+bodycomp_deltas <- pancreatic_subset2
 clusters                               <- as.data.frame(as.factor(bodycomp_deltas$cluster_name)) 
-clusters$`as.factor(bodycomp_deltas$cluster_name)` <- factor(clusters$`as.factor(bodycomp_deltas$cluster_name)`, levels = c("Inflammatory-Wasted", "Atrophy-Wasted", "Non-Wasted"))
+clusters$`as.factor(bodycomp_deltas$cluster_name)` <- factor(clusters$`as.factor(bodycomp_deltas$cluster_name)`, levels = c("Type A", "Type B", "Type C"))
 rownames(clusters)                     <- bodycomp_deltas$MRN
 
 delta_values                           <- bodycomp_deltas %>% 
@@ -243,6 +254,7 @@ clean_labels                           <- gsub("(?<=\\w)(Density)", " \\1", clea
 clean_labels                           <- gsub("(?<=\\w)(Volume)", " \\1", clean_labels, perl = TRUE)
 clean_labels                           <- gsub("Area", " Volume", clean_labels, perl = TRUE)
 clean_labels                           <- gsub("Muscle Volume", "SKM", clean_labels, perl = TRUE)
+clean_labels                           <- gsub("Muscle", "SKM", clean_labels, perl = TRUE)
 clean_labels                           <- gsub("BMDLStandard", " Bone Mineral Density", clean_labels, perl = TRUE)
 
 mat                 <- t(delta_values)
@@ -288,6 +300,6 @@ ht <- Heatmap(
   border_gp = gpar(lwd = 0.1)
 )
 
-pdf(file = "~/Desktop/reznik/bodycomp_main/results/cachexia/liver_pdac_heatmap_bodycompchanges.pdf", width = 2, height = 3)
+pdf(file = "~/Desktop/reznik/bodycomp_main/revision//main_figures//liver_pdac_heatmap_bodycompchanges.pdf", width = 2, height = 3)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
